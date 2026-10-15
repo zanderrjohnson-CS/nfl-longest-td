@@ -95,3 +95,19 @@ For a truly *independent source* check, I tried to cross-validate test-game TDs 
 - **Free and already in the data:** closing spread and total for every game (`spread_line`, `total_line`). Total points is a strong proxy for how many TDs, and so how many chances at a long one.
 
 Practical plan: evaluate the model against a fixed line (e.g. 40.5 yards, which goes over in about 45% of games historically) for 2016–2025, and log real lines from The Odds API free tier during 2026.
+
+## Stage 2: baseline tables
+
+`python3 scripts/baseline.py` builds lookup tables from the **train split only** and writes `data/baseline/*.csv` plus `data/baseline/report.md`:
+`position`, `spread`, `game_total`, `defense_season`, `coach_defense` (defensive head coach), `coach_vs_position`, then scores a simple baseline for P(game longest TD > 40.5) on valid/test.
+Small groups are shrunk toward the league rate so one wild season doesn't dominate.
+
+Spread, total and both head coaches come free in `raw/ref/games.csv` (`spread_line` is the home team's expected margin; positive = home favored).
+Coordinators are not in nflverse.
+
+What it found:
+- **Position is real signal.** 17% of WR TDs go 40+ yards vs 6% for RBs, 4% for TEs, 2% for QBs.
+- **Spread matters through volume, not length.** 10+ point favorites score a long TD in 29% of games vs 17% for 10+ point dogs, but the *share* of each team's TDs that are long is flat (~11-13%) across every spread bucket. Favorites just score more TDs, so they get more chances.
+- **Game total barely moves the game longest TD** (41-47% over 40.5 in every bucket).
+- **Defense and coach effects are mostly noise.** A defense's long-TDs-allowed rate correlates only 0.21 with its next season and 0.09 between odd and even weeks of the same season. Coach-vs-position gaps (e.g. Stefanski defenses vs WRs) are within what chance produces.
+- **The baseline doesn't beat a constant guess** for the game-level 40.5 prop (Brier 0.250 vs 0.246 on the 2024-25 test set). The game "longest TD" is very close to a coin flip with these features, so the edge has to come from player-level data (target depth, who's actually playing), which is the next stage.
