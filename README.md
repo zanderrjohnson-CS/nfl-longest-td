@@ -9,6 +9,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python3 scripts/download_data.py      # ~200 MB of parquet into raw/ (2016 to current season)
 python3 scripts/build_datasets.py     # builds data/ tables and splits.csv
+python3 scripts/baseline.py           # stage 2 lookup tables (optional)
+python3 scripts/features.py           # stage 3: one row per candidate per game, pregame features
+python3 scripts/model.py              # stage 3: fit + evaluate the King of the End Zone model
 ```
 
 `raw/` and `data/` are git-ignored; rerun the two scripts to regenerate them.
@@ -111,3 +114,35 @@ What it found:
 - **Game total barely moves the game longest TD** (41-47% over 40.5 in every bucket).
 - **Defense and coach effects are mostly noise.** A defense's long-TDs-allowed rate correlates only 0.21 with its next season and 0.09 between odd and even weeks of the same season. Coach-vs-position gaps (e.g. Stefanski defenses vs WRs) are within what chance produces.
 - **The baseline doesn't beat a constant guess** for the game-level 40.5 prop (Brier 0.250 vs 0.246 on the 2024-25 test set). The game "longest TD" is very close to a coin flip with these features, so the edge has to come from player-level data (target depth, who's actually playing), which is the next stage.
+
+## Stage 3: King of the End Zone model
+
+DraftKings' promo pays a share of a bonus-bet pool to everyone whose TD-scorer pick scores the game's
+**longest TD** (rush, catch or return; a QB's passing TD doesn't count; a D/ST or return TD also wins for that D/ST).
+So the target is: for each game, which candidate is king?
+
+- `scripts/features.py` builds one row per candidate per game: every RB/WR/TE/QB who took an offensive snap
+  (nflverse snap counts) plus each team's D/ST. Features are exponentially weighted averages of each player's
+  *previous* games only, so nothing from the game itself leaks in. No yardage cutoffs anywhere.
+- `scripts/model.py` fits a conditional logit (softmax across all candidates in a game, so each game's
+  probabilities add to 1). Features go in by group: position, usage, target depth, big-play history,
+  spread/total, opponent defense, opponent head coach. Inside a group, each feature is tried alone and kept
+  only if it lowers 5-fold cross-validated log loss on 2016-23 by 0.001+. 2024-25 is touched once at the end.
+  Outputs in `data/model/report.md`.
+
+Result on the untouched 2024-25 test seasons (565 games):
+
+| Model | Avg. probability given to the real king | Favourite was king |
+|---|---|---|
+| Every candidate equal | 4.0% | 1.8% |
+| Position only | 4.2% | 7.8% |
+| **Conditional logit** | **5.6%** | **11.7%** |
+| LightGBM, same features | 5.4% | 10.4% |
+
+What earned a place (in order of strength): position, recent snap share / targets / carries, the player's
+typical longest play per game, team implied points, target depth (aDOT), YAC per catch, and the team's
+D/ST TD history. Opponent defense and opponent head coach were tried and **rejected**: they didn't help
+out of sample. D/ST units win about 15% of games between them, more than TEs.
+
+For the promo the payout per winner is pool / number of winning entries, so value = P(king) / popularity.
+The model gives P(king); popularity is not in any free data, but popular picks are usually the shortest-odds TD scorers.
